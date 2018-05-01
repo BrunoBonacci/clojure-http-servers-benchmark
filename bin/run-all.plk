@@ -1,0 +1,239 @@
+#!/usr/bin/env planck
+
+(ns script.run-all
+  (:require [planck.core :refer [spit sleep]]
+            [planck.shell :refer [sh sh-async with-sh-dir]]
+            [planck.io :as io]
+            [planck.http :as http]
+            [clojure.string :as str]
+            [goog.i18n.DateTimeFormat :as dtf]
+            [goog.string :as gstring]
+            [goog.string.format]
+            ))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                                                            ;;
+;;                       ----==| U T I L I T Y |==----                        ;;
+;;                                                                            ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn format-date-generic
+  "Format a date using either the built-in goog.i18n.DateTimeFormat.Format enum
+  or a formatting string like \"dd MMMM yyyy\""
+  [date-format date]
+  (.format (goog.i18n.DateTimeFormat.
+            date-format)
+           (js/Date. date)))
+
+
+(defn get-env []
+  (into {}
+        (map (fn [line]
+               (str/split line #"=" 2))
+             (-> (:out (sh "env"))
+                 (str/split #"\n")))))
+
+
+(defn path
+  [& args]
+  (as-> args $
+       (str/join "/" $)
+       (str/replace $ #"/+" "/")))
+
+
+(defn msg [& message]
+  (apply println "(*)" message))
+
+
+(defn debug [& message]
+  (apply println "(D)" message))
+
+
+(defn sh! [cmd]
+  (let [args (str/split cmd #" +")
+        _    (debug "running1: " cmd)
+        _     (debug "running2: " (pr-str args))
+        out  (apply sh args)]
+    (when (not= 0 (:exit out))
+      (throw (ex-info (str "FAILED: " cmd) out)))
+    out))
+
+
+(defn which [cmd]
+  (let [{:keys [exit out]} (sh "which" cmd)]
+    (when (= exit 0)
+      (str/trim out))))
+
+
+(defn which-tool
+  [cmd url]
+  (or (which cmd)
+     (throw (ex-info (str "Missing required tool '" cmd "'. "
+                          "please install it and add it to the $PATH. "
+                          "see: " url) {}))))
+
+(defn now []
+  (.getTime (js/Date.)))
+
+
+(defn wait-for
+  "It waits for a given endpoint to come alive and reply HTTP 200"
+  [name endpoint
+   & {:keys [max-seconds interval] :as opts
+      :or {max-seconds 60 interval 1}}]
+  (msg "Waiting for" name "at" endpoint)
+  (let [start (now)]
+    (loop []
+      (when
+          (-> (try (http/get endpoint {:timeout 1})
+                   (catch :default _ nil))
+              :status
+              (not= 200))
+        (msg "   ... retrying in:" interval "second(s).")
+        (sleep (* interval 1000))
+        (if (< (- (now) start) (* 1000 max-seconds))
+          (recur)
+          (throw (ex-info (str "Timed out waiting for:" name)
+                          {:name name :endpoint endpoint} )))))
+    (msg "... ready!")))
+
+;; (wait-for "foo" "http://127.0.0.1:3000" :max-seconds 10)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                                                            ;;
+;;                        ----==| C O N F I G |==----                         ;;
+;;                                                                            ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn config [cfg]
+  (-> {;;Project base-dir
+       :base (->> (sh "pwd") :out str/trim (#(str/replace % #"/bin$" "")))
+
+       ;; location of the java executable
+       :java (which-tool "java" "http://www.oracle.com/technetwork/java/javase/downloads/index.html")
+
+       ;; location of the wrk2 executable
+       :wrk (which-tool "wrk" "https://github.com/giltene/wrk2")
+
+       ;; location of the leiningen executable
+       :lein (which-tool "lein" "https://leiningen.org")
+
+       ;; timestamp
+       :ts (format-date-generic "yyyy-MM-dd_HH-mm-ss" (js/Date.))
+
+       ;; list of servers to test
+       :servers ["aleph" "httpkit" "jetty"]
+
+       ;; Throughput to test req x sec
+       :req-x-sec 500
+
+       ;; number of connections
+       :connections 500
+
+       ;; time to warm up the service before the test
+       :warmup-time "10s"
+
+       ;; duration of the actual test
+       :duration "30s"
+
+       ;; java options for the server
+       :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
+
+       ;; server port
+       :port 3000
+
+       ;; tests to run
+       :tests [:simple-get :post-1k]
+       }
+      (merge cfg)))
+
+
+(def CFG (config {}))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                                                            ;;
+;;                    ----==| O P E R A T I O N S |==----                     ;;
+;;                                                                            ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn path-exists?
+  ([path]
+   (path-exists? path :any))
+  ([path path-type]
+   (let [{:keys [type] :as f} (-> path io/file io/file-attributes)]
+     (if (= path-type :any)
+       (boolean f)
+       (and f (= type path-type))))))
+
+
+(defn build-project
+  [{:keys [base] :as config} project]
+  (msg "Building" project)
+  (with-sh-dir (path base project)
+    (sh! "lein do clean, uberjar"))
+  (let [output (path base project "target" (str project ".jar"))]
+    (when (path-exists? output)
+      (msg "Building" project "OK!")
+      output)))
+
+
+(defn build-all-servers [{:keys [servers] :as config}]
+  (doseq [server servers]
+    (build-project config (str server "-server"))))
+
+;; (build-all-servers CFG)
+
+(defn wrk
+  [{:keys [threads connections duration timeout rate script url wrk] :as cfg
+    :or {threads 3 timeout "1s"}}]
+  {:pre [threads connections duration timeout rate url wrk]}
+  (let [script (if script (gstring/format "-s %s" script) "")
+        cmd    (gstring/format "%s -t%d -c%d --timeout %s -d%s -R%d -L %s %s"
+                               wrk threads connections timeout duration rate script url)]
+    (sh! cmd)))
+
+
+;;(prn (wrk {:wrk (which "wrk") :connections 500 :rate 500 :duration "10s" :url "http://127.0.0.1:3000/"}))
+
+
+;; discard the output
+(defn run-warmup [{:keys [req-x-sec connections warmup-time] :as config} endpoint]
+  (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration warmup-time :url endpoint}))
+
+
+(defn run-load [{:keys [req-x-sec connections duration] :as config} endpoint result-file]
+  (->>
+   (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration duration :url endpoint})
+   :out
+   (spit (and (io/make-parents result-file) result-file))))
+
+
+;; TODO: maybe split in two sh-in-bg! + java-cmd
+(defn run-java-with-pid [{:keys [java properties jar-name] :as cfg}]
+  {:pre [java properties jar-name]}
+  (let [props (str/join " " properties)
+        javacmd  (gstring/format "%s %s -jar %s" java props jar-name)
+        script-cnt (gstring/format "#!/bin/bash\n\n%s &> /dev/null &\necho $!\n" javacmd)
+        script (path "/tmp" (str "script-" (random-uuid) ".sh"))]
+    (spit script script-cnt)
+    (debug "script:" script)
+    (try
+      (->> (sh! (str "bash " script))
+           :out
+           (js/parseInt)
+           (assoc {} :pid))
+      (finally
+        (try (io/delete-file script)
+             (catch :default _))))))
+
+
+(comment
+  (run-java-with-pid
+   {:java (which "java")
+    :properties ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
+    :jar-name "/Users/bbonacci/work/exp/clojure-http/aleph-server/target/aleph-server.jar"
+    })
+
+  )
