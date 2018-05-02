@@ -229,6 +229,13 @@
              (catch :default _))))))
 
 
+(defn ps [& {:keys [pid]}]
+  {:pre [pid]}
+  (as-> (sh "ps" "-p" (str pid)) $
+    (when (= 0 (:exit $))
+      (str/trim (:out $)))))
+
+
 (comment
   (run-java-with-pid
    {:java (which "java")
