@@ -141,7 +141,7 @@
        :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
 
        ;; server port
-       :port 3000
+       :endpoint "http://127.0.0.1:3000/"
 
        ;; tests to run
        :tests [:simple-get :post-1k]
@@ -200,10 +200,12 @@
 
 ;; discard the output
 (defn run-warmup [{:keys [req-x-sec connections warmup-time] :as config} endpoint]
+  (msg "Warmup server:" server)
   (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration warmup-time :url endpoint}))
 
 
 (defn run-load [{:keys [req-x-sec connections duration] :as config} endpoint result-file]
+  (msg "Run test server:" server)
   (->>
    (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration duration :url endpoint})
    :out
@@ -211,9 +213,9 @@
 
 
 ;; TODO: maybe split in two sh-in-bg! + java-cmd
-(defn run-java-with-pid [{:keys [java properties jar-name] :as cfg}]
-  {:pre [java properties jar-name]}
-  (let [props (str/join " " properties)
+(defn run-java-with-pid [{:keys [java jvm-opts jar-name] :as cfg}]
+  {:pre [java jvm-opts jar-name]}
+  (let [props (str/join " " jvm-opts)
         javacmd  (gstring/format "%s %s -jar %s" java props jar-name)
         script-cnt (gstring/format "#!/bin/bash\n\n%s &> /dev/null &\necho $!\n" javacmd)
         script (path "/tmp" (str "script-" (random-uuid) ".sh"))]
@@ -236,11 +238,50 @@
       (str/trim (:out $)))))
 
 
+(defn start-server
+  [config server]
+
+  (msg "Starting server:" server)
+
+  (let [p
+        (run-java-with-pid
+         (-> config
+             (select-keys [:java :jvm-opts])
+             (assoc :jar-name (path (:base config) server "target"  (str server ".jar")))))]
+
+    (sleep 1000)
+    (if-not (ps :pid (:pid p))
+      (throw (ex-info "server didn't start" {:server server}))
+      (do
+        (wait-for server (:endpoint config))
+        p))))
+
+
+(defn run-test
+  [config server test]
+
+  (let [p (start-server config server)
+        _ (run-warmup config (:endpoint config))
+        _ (sleep 2000)
+        _ (run-load config (:endpoint config) "TODO")])
+  )
+
 (comment
+
+  (def server "aleph-server")
+  (build-project CFG "aleph-server")
+
   (run-java-with-pid
    {:java (which "java")
-    :properties ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
-    :jar-name "/Users/bbonacci/work/exp/clojure-http/aleph-server/target/aleph-server.jar"
+    :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
+    :jar-name (path (:base CFG) "aleph-server/target/aleph-server.jar")
     })
 
+  (ps :pid 6871)
+
+  (wait-for "aleph-server" "http://127.0.0.1:3000/")
+
+  (run-warmup CFG "http://127.0.0.1:3000/")
+
+  (run-load (assoc CFG :duration "10s") "http://127.0.0.1:3000/" "/tmp/aleph.out")
   )
