@@ -200,12 +200,11 @@
 
 ;; discard the output
 (defn run-warmup [{:keys [req-x-sec connections warmup-time] :as config} endpoint]
-  (msg "Warmup server:" server)
   (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration warmup-time :url endpoint}))
 
 
 (defn run-load [{:keys [req-x-sec connections duration] :as config} endpoint result-file]
-  (msg "Run test server:" server)
+
   (->>
    (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration duration :url endpoint})
    :out
@@ -238,6 +237,11 @@
       (str/trim (:out $)))))
 
 
+(defn kill [pid]
+  {:pre [pid]}
+  (:exit (sh "kill" "-9" (str pid))))
+
+
 (defn start-server
   [config server]
 
@@ -254,34 +258,27 @@
       (throw (ex-info "server didn't start" {:server server}))
       (do
         (wait-for server (:endpoint config))
-        p))))
+        (:pid p)))))
 
 
 (defn run-test
-  [config server test]
+  [{:keys [endpoint base ts] :as config} server test]
 
-  (let [p (start-server config server)
-        _ (run-warmup config (:endpoint config))
-        _ (sleep 2000)
-        _ (run-load config (:endpoint config) "TODO")])
-  )
+  (let [pid    (start-server config server)
+        _      (msg "Warmup server:" server)
+        _      (run-warmup config endpoint)
+        _      (sleep 2000)
+        _      (msg "Run test server:" server)
+        result (path base "results" ts (name test) (str server ".txt"))
+        _      (run-load config endpoint result)
+        _      (msg "Shutting down server:" server)
+        _      (kill pid)]
+    result))
+
 
 (comment
 
-  (def server "aleph-server")
-  (build-project CFG "aleph-server")
+  (run-test CFG "aleph-server" :simple-get)
 
-  (run-java-with-pid
-   {:java (which "java")
-    :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
-    :jar-name (path (:base CFG) "aleph-server/target/aleph-server.jar")
-    })
 
-  (ps :pid 6871)
-
-  (wait-for "aleph-server" "http://127.0.0.1:3000/")
-
-  (run-warmup CFG "http://127.0.0.1:3000/")
-
-  (run-load (assoc CFG :duration "10s") "http://127.0.0.1:3000/" "/tmp/aleph.out")
   )
