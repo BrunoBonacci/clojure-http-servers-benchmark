@@ -43,11 +43,25 @@
 
 
 (defn msg [& message]
-  (apply println "(*)" message))
+  (if (map? (first message))
+    (cond
 
+      (= :big (:type (first message)))
+      (do
+        (println "(*) ------------------------------------------------------------")
+        (apply msg (rest message))
+        (println "(*) ------------------------------------------------------------"))
+
+      :else
+      (prn "(*)" message))
+    (apply println "(*)" message)))
+
+
+(def is-debug? (get (get-env) "DEBUG"))
 
 (defn debug [& message]
-  (apply println "(D)" message))
+  (when is-debug?
+    (apply println "(D)" message)))
 
 
 (defn sh! [cmd]
@@ -100,56 +114,18 @@
 
 ;; (wait-for "foo" "http://127.0.0.1:3000" :max-seconds 10)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;                                                                            ;;
-;;                        ----==| C O N F I G |==----                         ;;
-;;                                                                            ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn config [cfg]
-  (-> {;;Project base-dir
-       :base (->> (sh "pwd") :out str/trim (#(str/replace % #"/bin$" "")))
-
-       ;; location of the java executable
-       :java (which-tool "java" "http://www.oracle.com/technetwork/java/javase/downloads/index.html")
-
-       ;; location of the wrk2 executable
-       :wrk (which-tool "wrk" "https://github.com/giltene/wrk2")
-
-       ;; location of the leiningen executable
-       :lein (which-tool "lein" "https://leiningen.org")
-
-       ;; timestamp
-       :ts (format-date-generic "yyyy-MM-dd_HH-mm-ss" (js/Date.))
-
-       ;; list of servers to test
-       :servers ["aleph" "httpkit" "jetty"]
-
-       ;; Throughput to test req x sec
-       :req-x-sec 500
-
-       ;; number of connections
-       :connections 500
-
-       ;; time to warm up the service before the test
-       :warmup-time "10s"
-
-       ;; duration of the actual test
-       :duration "30s"
-
-       ;; java options for the server
-       :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
-
-       ;; server port
-       :endpoint "http://127.0.0.1:3000/"
-
-       ;; tests to run
-       :tests [:simple-get :post-1k]
-       }
-      (merge cfg)))
+(defn ps [& {:keys [pid]}]
+  {:pre [pid]}
+  (as-> (sh "ps" "-p" (str pid)) $
+    (when (= 0 (:exit $))
+      (str/trim (:out $)))))
 
 
-(def CFG (config {}))
+(defn kill [pid]
+  {:pre [pid]}
+  (:exit (sh "kill" "-9" (str pid))))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -181,7 +157,7 @@
 
 (defn build-all-servers [{:keys [servers] :as config}]
   (doseq [server servers]
-    (build-project config (str server "-server"))))
+    (build-project config server)))
 
 ;; (build-all-servers CFG)
 
@@ -199,16 +175,20 @@
 
 
 ;; discard the output
-(defn run-warmup [{:keys [req-x-sec connections warmup-time] :as config} endpoint]
-  (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration warmup-time :url endpoint}))
+(defn run-warmup [{:keys [req-x-sec connections warmup-time script base] :as config} endpoint]
+  (let [script (if (and script (not (str/starts-with? script "/")) ) (path base script) script)]
+    (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec
+          :duration warmup-time :script script :url endpoint})))
 
 
-(defn run-load [{:keys [req-x-sec connections duration] :as config} endpoint result-file]
+(defn run-load [{:keys [req-x-sec connections duration script base] :as config} endpoint result-file]
 
-  (->>
-   (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec :duration duration :url endpoint})
-   :out
-   (spit (and (io/make-parents result-file) result-file))))
+  (let [script (if (and script (not (str/starts-with? script "/")) ) (path base script) script)]
+    (->>
+     (wrk {:wrk (:wrk config) :connections connections :rate req-x-sec
+           :duration duration  :script script :url endpoint})
+     :out
+     (spit (and (io/make-parents result-file) result-file)))))
 
 
 ;; TODO: maybe split in two sh-in-bg! + java-cmd
@@ -228,18 +208,6 @@
       (finally
         (try (io/delete-file script)
              (catch :default _))))))
-
-
-(defn ps [& {:keys [pid]}]
-  {:pre [pid]}
-  (as-> (sh "ps" "-p" (str pid)) $
-    (when (= 0 (:exit $))
-      (str/trim (:out $)))))
-
-
-(defn kill [pid]
-  {:pre [pid]}
-  (:exit (sh "kill" "-9" (str pid))))
 
 
 (defn start-server
@@ -263,12 +231,14 @@
 
 (defn run-test
   [{:keys [endpoint base ts] :as config} server test]
-
-  (let [pid    (start-server config server)
+  (msg {:type :big} "Running test:" test "on" server ", please wait.")
+  (let [test-conf (get-in config [:test-conf test])
+        config (merge config test-conf)
+        pid    (start-server config server)
         _      (msg "Warmup server:" server)
         _      (run-warmup config endpoint)
         _      (sleep 2000)
-        _      (msg "Run test server:" server)
+        _      (msg "Run test on server:" server)
         result (path base "results" ts (name test) (str server ".txt"))
         _      (run-load config endpoint result)
         _      (msg "Shutting down server:" server)
@@ -276,9 +246,91 @@
     result))
 
 
+(defn run-all-tests
+  [{:keys [endpoint base ts] :as config} & {:keys [servers tests]}]
+  (->> (for [test   (or tests   (:tests config))
+           server (or servers (:servers config))]
+         [config server test])
+       (run! (partial apply run-test))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                                                            ;;
+;;                        ----==| C O N F I G |==----                         ;;
+;;                                                                            ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn config [cfg]
+  (-> {;;Project base-dir
+       :base (->> (sh "pwd") :out str/trim (#(str/replace % #"/bin$" "")))
+
+       ;; location of the java executable
+       :java (which-tool "java" "http://www.oracle.com/technetwork/java/javase/downloads/index.html")
+
+       ;; location of the wrk2 executable
+       :wrk (which-tool "wrk" "https://github.com/giltene/wrk2")
+
+       ;; location of the leiningen executable
+       :lein (which-tool "lein" "https://leiningen.org")
+
+       ;; timestamp
+       :ts (format-date-generic "yyyy-MM-dd_HH-mm-ss" (js/Date.))
+
+       ;; list of servers to test
+       :servers ["aleph-server" "httpkit-server" "jetty-server"]
+
+       ;; Throughput to test req x sec
+       :req-x-sec 500
+
+       ;; number of connections
+       :connections 500
+
+       ;; time to warm up the service before the test
+       :warmup-time "10s"
+
+       ;; duration of the actual test
+       :duration "300s"
+
+       ;; java options for the server
+       :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
+
+       ;; server port
+       :endpoint "http://127.0.0.1:3000/"
+
+       ;; tests to run
+       :tests [:simple-get :post-1k :post-4k]
+
+       ;; test configuration
+       :test-conf
+       {:post-1k {:script "./scripts/post1k.lua"}
+        :post-4k {:script "./scripts/post4k.lua"}}
+       }
+      (merge cfg)))
+
+
+;;
+;; define configuration
+;;
+(def CFG (config {}))
+
+;;
+;; build uberjars
+;;
+(build-all-servers CFG)
+
+;;
+;; run tests
+;;
+(run-all-tests CFG)
+
+
 (comment
 
+  (build-all-servers CFG)
+  (run-all-tests CFG :servers ["jetty-server"] :tests [:post-4k])
+
   (run-test CFG "aleph-server" :simple-get)
+  (run-test CFG "httpkit-server" :simple-get)
+  (run-test CFG "jetty-server" :simple-get)
 
 
   )
