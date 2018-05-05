@@ -344,7 +344,7 @@
        :warmup-time "10s"
 
        ;; duration of the actual test
-       :duration "30s"
+       :duration "300s"
 
        ;; java options for the server
        :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"
