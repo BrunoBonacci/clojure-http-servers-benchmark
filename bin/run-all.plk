@@ -1,7 +1,8 @@
 #!/usr/bin/env planck
 
 (ns script.run-all
-  (:require [planck.core :refer [spit sleep]]
+  (:require [planck.core :refer
+             [spit slurp sleep read-string *command-line-args*]]
             [planck.shell :refer [sh sh-async with-sh-dir]]
             [planck.io :as io]
             [planck.http :as http]
@@ -136,6 +137,16 @@
   {:pre [pid]}
   (:exit (sh "kill" "-9" (str pid))))
 
+
+
+(defn read-config-file [file]
+  (-> (slurp file)
+      (read-string)))
+
+
+(defn option-config [[opt file :as  args]]
+  (when (and (= opt "-c") (not (nil? file)))
+    (read-config-file file)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -336,7 +347,7 @@
 ;;
 ;; define configuration
 ;;
-(def CFG (config {}))
+(def CFG (config (option-config *command-line-args*)))
 
 ;;
 ;; build uberjars
