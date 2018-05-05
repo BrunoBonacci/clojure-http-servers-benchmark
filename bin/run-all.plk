@@ -46,6 +46,16 @@
   (if (map? (first message))
     (cond
 
+      (= :huge (:type (first message)))
+      (do
+        (println "(*)")
+        (println "(*) ============================================================")
+        (println "(*)")
+        (apply msg (map (comp str/upper-case str) (rest message)))
+        (println "(*)")
+        (println "(*) ============================================================")
+        (println "(*)"))
+
       (= :big (:type (first message)))
       (do
         (println "(*) ------------------------------------------------------------")
@@ -246,8 +256,19 @@
     result))
 
 
+(defn write-hardware-info
+  [{:keys [hw-info hw-info-opts base ts] :as config}]
+  (msg "Writing hardware info")
+  (let [info-file (path base "results" ts "hardware-info.txt")]
+    (->> (sh! (str hw-info " " hw-info-opts))
+         :out
+         (spit (and (io/make-parents info-file) info-file)))))
+
+
 (defn run-all-tests
   [{:keys [endpoint base ts] :as config} & {:keys [servers tests]}]
+  (msg {:type :huge} "Starting benchmarks")
+  (write-hardware-info config)
   (->> (for [test   (or tests   (:tests config))
            server (or servers (:servers config))]
          [config server test])
@@ -271,6 +292,11 @@
 
        ;; location of the leiningen executable
        :lein (which-tool "lein" "https://leiningen.org")
+
+       ;; hardware-info tool loocation
+       :hw-info (which-tool "neofetch" "https://github.com/dylanaraps/neofetch/wiki/Installation")
+       ;; command line options for the hw-info tool
+       :hw-info-opts "--stdout"
 
        ;; timestamp
        :ts (format-date-generic "yyyy-MM-dd_HH-mm-ss" (js/Date.))
@@ -331,6 +357,5 @@
   (run-test CFG "aleph-server" :simple-get)
   (run-test CFG "httpkit-server" :simple-get)
   (run-test CFG "jetty-server" :simple-get)
-
 
   )
