@@ -150,6 +150,26 @@
     (read-config-file file)))
 
 
+(defn sh-background-pid
+  [cmd]
+  (let [script-cnt (gstring/format "#!/bin/bash\n\n%s &\necho $!\n" cmd)
+        script (path "/tmp" (str "script-" (random-uuid) ".sh"))]
+    (spit script script-cnt)
+    (debug "script:" script)
+    (try
+      (->> (sh! (str "bash " script))
+           :out
+           (js/parseInt))
+      (finally
+        (try (io/delete-file script)
+             (catch :default _))))))
+
+
+(defn jstat [{:keys [jstat]} pid outfile]
+  (sh-background-pid
+   (gstring/format "%s -gccause %d 1000 &> %s" jstat pid outfile)))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                                                                            ;;
 ;;                    ----==| O P E R A T I O N S |==----                     ;;
@@ -213,24 +233,14 @@
      (spit (and (io/make-parents result-file) result-file)))))
 
 
-;; TODO: maybe split in two sh-in-bg! + java-cmd
+
 (defn run-java-with-pid [{:keys [java jvm-opts jar-name gc-log-file] :as cfg
                           :or {gc-log-file "./gc-log-file.log"}}]
   {:pre [java jvm-opts jar-name]}
   (let [props (str/join " " jvm-opts)
-        javacmd  (gstring/format "%s %s -jar %s" java props jar-name)
-        script-cnt (gstring/format "#!/bin/bash\n\nexport GC_LOG_FILE=%s\n%s &> /dev/null &\necho $!\n" gc-log-file javacmd)
-        script (path "/tmp" (str "script-" (random-uuid) ".sh"))]
-    (spit script script-cnt)
-    (debug "script:" script)
-    (try
-      (->> (sh! (str "bash " script))
-           :out
-           (js/parseInt)
-           (assoc {} :pid))
-      (finally
-        (try #_(io/delete-file script)
-             (catch :default _))))))
+        props (str/replace props #"\$\{GC_LOG_FILE\}" gc-log-file)
+        javacmd  (gstring/format "%s %s -jar %s &> /dev/null" java props jar-name)]
+    (sh-background-pid javacmd)))
 
 
 (defn start-server
@@ -238,18 +248,22 @@
 
   (msg "Starting server:" server)
 
-  (let [p
+  (let [_ (io/make-parents (:gc-log-file config))
+        pid
         (run-java-with-pid
          (-> config
              (select-keys [:java :jvm-opts :gc-log-file])
              (assoc :jar-name (path (:base config) server "target"  (str server ".jar")))))]
 
     (sleep 1000)
-    (if-not (ps :pid (:pid p))
+    (if-not (ps :pid pid)
       (throw (ex-info "server didn't start" {:server server}))
-      (do
+      (let [statfile (str/replace-first (:gc-log-file config) #"(\.gclog)?$" ".gcstat")
+            _ (io/make-parents statfile)
+            jst-pid (jstat config pid statfile)]
+        (msg "started server with pid:" pid "and jstat with:" jst-pid)
         (wait-for server (:endpoint config))
-        (:pid p)))))
+        {:pid pid :jstat-pid jst-pid}))))
 
 
 (defn run-test
@@ -266,7 +280,8 @@
         result (path base "results" ts (name test) (str server ".out"))
         _      (run-load config endpoint result)
         _      (msg "Shutting down server:" server)
-        _      (kill pid)]
+        _      (kill (:pid pid))
+        _      (kill (:jstat-pid pid))]
     result))
 
 
@@ -300,6 +315,7 @@
 
        ;; location of the java executable
        :java (which-tool "java" "http://www.oracle.com/technetwork/java/javase/downloads/index.html")
+       :jstat (which-tool "jstat" "http://www.oracle.com/technetwork/java/javase/downloads/index.html")
 
        ;; location of the wrk2 executable
        :wrk (which-tool "wrk" "https://github.com/giltene/wrk2")
@@ -328,7 +344,7 @@
        :warmup-time "10s"
 
        ;; duration of the actual test
-       :duration "300s"
+       :duration "30s"
 
        ;; java options for the server
        :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"
@@ -336,7 +352,6 @@
                   "-verbose:gc" "-XX:+PrintHeapAtGC" "-XX:+PrintGCDetails"
                   "-XX:+PrintGCCause" "-XX:+PrintGCDateStamps"
                   "-XX:+PrintTenuringDistribution"
-                  "-XX:+PrintGCApplicationStoppedTime"
                   "-Xloggc:${GC_LOG_FILE}"
                   ]
 
