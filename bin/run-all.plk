@@ -140,6 +140,7 @@
 
 
 (defn read-config-file [file]
+  (msg "Reading config from:" file)
   (-> (slurp file)
       (read-string)))
 
@@ -213,11 +214,12 @@
 
 
 ;; TODO: maybe split in two sh-in-bg! + java-cmd
-(defn run-java-with-pid [{:keys [java jvm-opts jar-name] :as cfg}]
+(defn run-java-with-pid [{:keys [java jvm-opts jar-name gc-log-file] :as cfg
+                          :or {gc-log-file "./gc-log-file.log"}}]
   {:pre [java jvm-opts jar-name]}
   (let [props (str/join " " jvm-opts)
         javacmd  (gstring/format "%s %s -jar %s" java props jar-name)
-        script-cnt (gstring/format "#!/bin/bash\n\n%s &> /dev/null &\necho $!\n" javacmd)
+        script-cnt (gstring/format "#!/bin/bash\n\nexport GC_LOG_FILE=%s\n%s &> /dev/null &\necho $!\n" gc-log-file javacmd)
         script (path "/tmp" (str "script-" (random-uuid) ".sh"))]
     (spit script script-cnt)
     (debug "script:" script)
@@ -227,7 +229,7 @@
            (js/parseInt)
            (assoc {} :pid))
       (finally
-        (try (io/delete-file script)
+        (try #_(io/delete-file script)
              (catch :default _))))))
 
 
@@ -239,7 +241,7 @@
   (let [p
         (run-java-with-pid
          (-> config
-             (select-keys [:java :jvm-opts])
+             (select-keys [:java :jvm-opts :gc-log-file])
              (assoc :jar-name (path (:base config) server "target"  (str server ".jar")))))]
 
     (sleep 1000)
@@ -254,13 +256,14 @@
   [{:keys [endpoint base ts] :as config} server test]
   (msg {:type :big} "Running test:" test "on" server ", please wait.")
   (let [test-conf (get-in config [:test-conf test])
-        config (merge config test-conf)
+        gc-log (path base "results" ts (name test) (str server ".gclog"))
+        config (merge config test-conf {:gc-log-file gc-log})
         pid    (start-server config server)
         _      (msg "Warmup server:" server)
         _      (run-warmup config endpoint)
         _      (sleep 2000)
         _      (msg "Run test on server:" server)
-        result (path base "results" ts (name test) (str server ".txt"))
+        result (path base "results" ts (name test) (str server ".out"))
         _      (run-load config endpoint result)
         _      (msg "Shutting down server:" server)
         _      (kill pid)]
@@ -328,7 +331,14 @@
        :duration "300s"
 
        ;; java options for the server
-       :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"]
+       :jvm-opts ["-server" "-Xmx1G" "-Xms1G" "-XX:+UseG1GC"
+                  ;;"-Xlog:gc:file=${GC_LOG_FILE}" ;; java10
+                  "-verbose:gc" "-XX:+PrintHeapAtGC" "-XX:+PrintGCDetails"
+                  "-XX:+PrintGCCause" "-XX:+PrintGCDateStamps"
+                  "-XX:+PrintTenuringDistribution"
+                  "-XX:+PrintGCApplicationStoppedTime"
+                  "-Xloggc:${GC_LOG_FILE}"
+                  ]
 
        ;; server port
        :endpoint "http://127.0.0.1:3000/"
