@@ -189,3 +189,6 @@ allocation rate.
 In the hope that this comparison is useful to someone, or just
 inspiration for more detailed research, I'll include all the raw data
 and reproducible setup. Happy testing!
+
+If you have any question or comment please open a issue on the GitHub
+project.

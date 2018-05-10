@@ -35,8 +35,6 @@ a specific case.
 
 ## Results
 
-
-
 * See [latest report](./results/2018-05-05_17-05-42/README.md)
 
 [![latency](./results/2018-05-05_17-05-42/simple-get/simple-get-latency.png)](./results/2018-05-05_17-05-42/README.md)
