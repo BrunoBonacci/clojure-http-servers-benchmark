@@ -1,5 +1,7 @@
 # Clojure HTTP servers benchmark
 
+Chasing the long tail of Clojure HTTP servers.
+
 ## Preface
 
 *This work is not intended as a critique to the excellent work that
@@ -25,7 +27,15 @@ library in a vanilla case. Settings and configuration might not apply
 in your project when extensive business logic is applied which
 substantially change the scenario.
 
+NOTE: **I'm aware of the similar work from Peter Taoussanis
+[clojure-web-server-benchmarks](https://github.com/ptaoussanis/clojure-web-server-benchmarks)**
+While Peter's work is targeted to find the peak performances in a
+number of different setup, my work looks only at the tail latency for
+a specific case.
+
 ## Results
+
+
 
 * See [latest report](./results/2018-05-05_17-05-42/README.md)
 
