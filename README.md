@@ -1,7 +1,39 @@
 # Clojure HTTP servers benchmark
 
+## Preface
 
-## how to run
+*This work is not intended as a critique to the excellent work that
+the library authors have done. Each of the HTTP server libraries
+compared here have excellent performance characteristics, they are
+very stable and widely used to power loads of HTTP based services all
+around the world.*
+
+*This project aims to examine the _long tail_ for a very specific
+case.  The case we are going to look here fits the model of a
+**service-to-service** communication for a backend service. Where we
+assume long running persistent connections, and continuous throughput
+of requests.  This particular case is very different from front facing
+services with bursty and erratic request throughput.*
+
+*Therefore before jumping into conclusions, please think about the
+specifics of your case and if unsure collect metering data and use
+this or other test harnesses on your services to verify the behaviour
+of these libraries in your particular case.*
+
+The aim of the _long tail_ analysis is to understand the impact of the
+library in a vanilla case. Settings and configuration might not apply
+in your project when extensive business logic is applied which
+substantially change the scenario.
+
+## Results
+
+* See [latest report](./results/2018-05-05_17-05-42/README.md)
+
+[![latency](./results/2018-05-05_17-05-42/simple-get/simple-get-latency.png)](./results/2018-05-05_17-05-42/README.md)
+
+* All [reports](./results/)
+
+## How to run
 
 To run need a few packages to be installed:
 
