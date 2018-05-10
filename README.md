@@ -30,7 +30,7 @@ substantially change the scenario.
 NOTE: **I'm aware of the similar work from Peter Taoussanis
 [clojure-web-server-benchmarks](https://github.com/ptaoussanis/clojure-web-server-benchmarks)**
 While Peter's work is targeted to find the peak performances in a
-number of different setup, my work looks only at the tail latency for
+number of different setup, my work only looks at the tail latency for
 a specific case.
 
 ## Results
@@ -45,7 +45,7 @@ a specific case.
 
 ## How to run
 
-To run need a few packages to be installed:
+To run the tests yourself you need a few packages to be installed:
 
   * Install the [Java JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * Install [leingen](https://leiningen.org)
