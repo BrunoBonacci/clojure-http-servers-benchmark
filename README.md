@@ -37,11 +37,11 @@ substantially change the scenario.
 
 To run need a few packages to be installed:
 
-  * Install the Java JDK
-  * Install leingen
-  * Install wrk2
-  * Install neofetch
-  * Install planck-repl
+  * Install the [Java JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
+  * Install [leingen](https://leiningen.org)
+  * Install [wrk2](https://github.com/giltene/wrk2)
+  * Install [neofetch](https://github.com/dylanaraps/neofetch/wiki/Installation)
+  * Install [planck-repl](http://planck-repl.org/)
 
 then clone the repo:
 

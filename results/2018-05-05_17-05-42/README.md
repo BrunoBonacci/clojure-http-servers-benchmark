@@ -73,12 +73,12 @@ The handler, for all three servers, look like as follow:
 ```
 
 If the request contains a body it will consume the body and return the
-length.  No middleware are used. You can see the code of each server
-here:
+length.  No middleware are used. Default configuration was used. You
+can see the code of each server here:
 
-  - [aleph-server](../../aleph-server/)
-  - [httpkit-server](../../httpkit-server/)
-  - [jetty-server](../../jetty-server/)
+  - [aleph-server](../../aleph-server/) (default config)
+  - [httpkit-server](../../httpkit-server/) (default config)
+  - [jetty-server](../../jetty-server/) (default config)
 
 
 ## Results
