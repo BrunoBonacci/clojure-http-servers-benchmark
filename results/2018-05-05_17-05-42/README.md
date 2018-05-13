@@ -120,20 +120,20 @@ Here a summary table of the GC pauses _(source: GCPlot analysis)_:
 | jetty    | 2.931 ms | 5.577  ms |
 
 As you can see from the graphs the GC collections are all Young
-Generation collection, which is expected as all every request dies
-when the response is sent (and all the objects are collected).
+Generation collection, which is expected as all request's objects die
+when the response is sent (and all objects are later collected).
 `aleph` seems to have suffered from initially slower collections but
 then it stabilized around the same level as the other ones.  From the
 number of points in the scatter plots you can see the number of GC
 events. You can quickly see that `jetty` is putting much more pressure
-of the Garbage Collector than the other ones. If we take a look to the
+on the Garbage Collector than the other ones. If we take a look to the
 allocation rates we can see it in numbers:
 
-| server   | Total allocation (GB) | Allocation Rate (MB/s) |
-|----------|----------------------:|-----------------------:|
-| aleph    |                19.872 |                   6.33 |
-| http-kit |                26.326 |                   2.68 |
-| jetty    |               278.370 |                  26.40 |
+| server   | Total allocation | Allocation Rate |
+|----------|-----------------:|----------------:|
+| aleph    |        19.872 GB |       6.33 MB/s |
+| http-kit |        26.326 GB |       2.68 MB/s |
+| jetty    |       278.370 GB |      26.40 MB/s |
 
 _(source: GCPlot analysis)_
 
@@ -141,8 +141,9 @@ _(source: GCPlot analysis)_
 
 ### HTTP POST with 1Kib and 4Kib body
 
-Here the same test with a HTTP POST this time, with a 1Kib body first, then 4Kib.
-The aim is to track verify whether a request body impacts the latency.
+Here the same test with a HTTP POST this time, with a 1Kib body first,
+then 4Kib.  The aim is to verify whether a request body (of various
+sizes) impacts the latency beside the obvious network transfer time.
 
   * HTTP POST 1Kib body
 ![post-1k](./post-1k/post-1k-latency.png)
@@ -155,7 +156,7 @@ As expected there is no much difference between the HTTP POST with
 1Kib body and the HTTP POST with 4Kib as well as no much difference
 than the HTTP GET without a body. This is what you would expect as the
 difference in data transfer for 1Kib to 4Kib on a 28Gbps network
-(m4.2xlarge on loopback) is in the order of a microsecond.
+(m4.2xlarge on loopback) is in the order of one microsecond.
 
 # Conclusions
 
@@ -166,7 +167,7 @@ organization.  If your service performs millions or billions or
 requests then it might be necessary to look deeper at the longer part
 of the tail.
 
-`http-kit` and `aleph` have a low gc impact compared to `ring-jetty`.
+`http-kit` and `aleph` have a low GC impact compared to `ring-jetty`.
 Even if in this particular setup the GC pressure wasn't causing long
 pauses mostly due to the fact that the servers were configured with
 way more memory than they needed (1Gb); in a real app, with the
@@ -177,14 +178,14 @@ allocation rate, and maintains lower latency throughout the higher
 percentile.
 
 The choice of the "best" HTTP server really depends on many other
-factors.  Each of the presented HTTP serves have different take on the
-abstractions they provide and the features they support, such as async
-calls, WebSockets, etc. Things like documentation, examples, community
-support were not examined here. Each of the above factors are key in
-the decision making process, and only after you choose which API you
-want to use and which abstractions are more suitable to express the
-behaviour you want, then it is time to look at tail latency and GC
-allocation rate.
+factors.  Each of the presented HTTP serves have a different take on
+the abstractions they provide and the features they support, such as
+async calls, WebSockets, etc. Things like documentation, examples,
+community support were not examined here. Each of the above factors
+are key in the decision making process, and only after you choose
+which API you want to use and which abstractions are more suitable to
+express the behaviour you want, then it is time to look at tail
+latency and GC allocation rate.
 
 In the hope that this comparison is useful to someone, or just
 inspiration for more detailed research, I'll include all the raw data
