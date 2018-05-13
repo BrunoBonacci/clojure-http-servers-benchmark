@@ -9,8 +9,7 @@
             [clojure.string :as str]
             [goog.i18n.DateTimeFormat :as dtf]
             [goog.string :as gstring]
-            [goog.string.format]
-            ))
+            [goog.string.format]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -294,14 +293,39 @@
          (spit (and (io/make-parents info-file) info-file)))))
 
 
+(defn write-system-info
+  [{:keys [java base ts] :as config}]
+  (let [info-file (path base "results" ts "sysconfig.txt")
+        jver    (:err (sh! (str java " -version")))
+        ulimit  (:out (sh! "ulimit -a"))
+        sysctl  (:out (sh! "sysctl -A"))
+        sep     (apply str (repeat 20 "-"))
+        sepline (fn [section] (str sep " " section " " sep))]
+    (->> [(sepline "java")
+          jver
+          (sepline "ulimit")
+          ulimit
+          (sepline "sysctl")
+          sysctl
+          ""]
+         (str/join "\n")
+         (spit (and (io/make-parents info-file) info-file)))
+    info-file))
+
+
 (defn run-all-tests
   [{:keys [endpoint base ts] :as config} & {:keys [servers tests]}]
-  (msg {:type :huge} "Starting benchmarks")
+  (msg {:type :huge} "Starting benchmarks" ts)
   (write-hardware-info config)
+  (write-system-info   config)
   (->> (for [test   (or tests   (:tests config))
            server (or servers (:servers config))]
          [config server test])
-       (run! (partial apply run-test))))
+       (run! (partial apply run-test)))
+  ;; completed, now advise how to create graphs
+  (msg (str "run:\n\t ./bin/plot-all.sh ./results/" ts
+            "\n\t To create the latency graphs.")))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                                                                            ;;
