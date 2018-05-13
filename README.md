@@ -43,7 +43,8 @@ a specific case.
 
 ## How to run
 
-To run the tests yourself you need a few packages to be installed:
+To run the tests yourself you need a few packages to be installed and
+available in the PATH:
 
   * Install the [Java JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * Install [leingen](https://leiningen.org)
