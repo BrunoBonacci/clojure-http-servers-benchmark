@@ -154,8 +154,8 @@ The aim is to track verify whether a request body impacts the latency.
 As expected there is no much difference between the HTTP POST with
 1Kib body and the HTTP POST with 4Kib as well as no much difference
 than the HTTP GET without a body. This is what you would expect as the
-difference in data transfer for 1Kib to 4Kib on a 1Gbps network
-(m4.2xlarge standard network) is in the order of few microseconds.
+difference in data transfer for 1Kib to 4Kib on a 28Gbps network
+(m4.2xlarge on loopback) is in the order of a microsecond.
 
 # Conclusions
 
