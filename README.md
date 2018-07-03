@@ -74,12 +74,8 @@ under a folder with the timestamp of when the test was started.
 
 You can generate the graphs with:
 
+    pip3 install --user --upgrade hdr-plot
     ./bin/plot-all.sh ./results/yyyy-mm-dd_hh-mm-ss/
-
-You need python3 installed along with a bunch of libraries, to install
-them run:
-
-    pip3 install --user pandas matplotlib
 
 ## License
 
